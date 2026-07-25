@@ -128,7 +128,7 @@ def main():
     plt.ion()
     fig, axes = plt.subplots(1, 4, figsize=(14, 4.2))
     fig.canvas.manager.set_window_title("ThermalGuard") if not args.save else None
-    cmap = plt.get_cmap("inferno").copy()
+    cmap = plt.get_cmap("inferno")
     cmap.set_bad(color="#777777")
 
     images, texts = {}, {}

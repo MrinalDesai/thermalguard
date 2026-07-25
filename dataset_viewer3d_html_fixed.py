@@ -4,14 +4,14 @@ Changes from the original:
 1. Uses linear interpolation for the coloured wall surface to avoid cubic
    overshoot creating artificial hot/cold patches.
 2. Disables hover on interpolated surfaces.
-3. Overlays the real 4x6 sensor positions as Scatter3d markers; hover values
+3. Overlays the real 4x5 sensor positions as Scatter3d markers; hover values
    now always come from the original sensor matrix, never from a hidden wall
    or an interpolated vertex.
 4. Marks the hottest real sensor in each case.
 
 Usage:
-  python dataset_viewer3d_html.py
-  python dataset_viewer3d_html.py --frame 115 --cmap inferno
+  python dataset_viewer3d_html_fixed.py
+  python dataset_viewer3d_html_fixed.py --frame 115 --cmap inferno
 """
 
 import argparse
@@ -98,7 +98,7 @@ def main():
         "--cmap", default="turbo",
         help="Plotly colourscale: turbo | inferno | jet"
     )
-    ap.add_argument("--out", default="dataset_cases_3d.html")
+    ap.add_argument("--out", default="dataset_cases_3d_fixed.html")
     ap.add_argument("--no-open", action="store_true")
     args = ap.parse_args()
 
@@ -115,12 +115,10 @@ def main():
     )
 
     titles = []
-    case_frames = {}
 
     for i, kind in enumerate(CASES):
         episode = run_case(kind, steps=args.frame + 1)
         mats, amb, score = episode[args.frame]
-        case_frames[kind] = (mats, amb, score)
         subplot_row, subplot_col = i // 2 + 1, i % 2 + 1
 
         hottest = None
@@ -215,7 +213,7 @@ def main():
         )
 
         # Explicit marker for the hottest real sensor.
-        if hottest is not None and hottest["value"] - amb > 2.0:
+        if hottest is not None:
             max_text = (
                 f"MAX — Wall {hottest['wall']}"
                 f"<br>R{hottest['row'] + 1} C{hottest['col'] + 1}"
@@ -273,41 +271,8 @@ def main():
         ann.text = title
         ann.font.size = 13
 
-    # ---- flat per-wall panels: gridded, value-labelled, pixel-exact hover ----
-    fig2 = make_subplots(
-        rows=len(CASES), cols=len(WALLS),
-        subplot_titles=[f"{k.upper()} — Wall {w}"
-                        for k in CASES for w in WALLS],
-        horizontal_spacing=0.03, vertical_spacing=0.07)
-    for ri, kind in enumerate(CASES):
-        mats, amb, score = case_frames[kind]
-        for ci, w in enumerate(WALLS):
-            grid = np.nan_to_num(np.asarray(mats[w], float), nan=amb)
-            fig2.add_trace(
-                go.Heatmap(z=grid, colorscale=args.cmap,
-                           zmin=VMIN, zmax=VMAX, xgap=2, ygap=2,
-                           texttemplate="%{z:.1f}",
-                           textfont=dict(size=10, color="white"),
-                           showscale=(ri == 0 and ci == 0),
-                           colorbar=dict(title="°C", len=0.9, x=1.02),
-                           hovertemplate="r%{y} c%{x}: %{z:.2f}°C"
-                                         "<extra></extra>"),
-                row=ri + 1, col=ci + 1)
-            ax = fig2.get_subplot(ri + 1, ci + 1)
-            ax.xaxis.update(visible=False)
-            ax.yaxis.update(visible=False, autorange="reversed")
-    fig2.update_layout(plot_bgcolor="black", height=950, width=1200,
-                       title="Exact readout panels — hover any point",
-                       margin=dict(l=10, r=80, t=60, b=10))
-    for ann in fig2.layout.annotations:
-        ann.font.size = 11
-
     out = Path(args.out).resolve()
-    html = ("<html><head><meta charset='utf-8'></head><body>"
-            + fig.to_html(full_html=False, include_plotlyjs="cdn")
-            + fig2.to_html(full_html=False, include_plotlyjs=False)
-            + "</body></html>")
-    out.write_text(html, encoding="utf-8")
+    fig.write_html(out, include_plotlyjs="cdn")
     print(f"saved {out}")
 
     if not args.no_open:

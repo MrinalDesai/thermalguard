@@ -1,0 +1,23 @@
+ try { . "c:\Users\mrina\AppData\Local\Programs\Microsoft VS Code\8a7abeba6e\resources\app\out\vs\workbench\contrib\terminal\...
+   2 (Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned) ; (& c:\Users\mrina\Downloads\rubu_in\.venv\Scripts\Activ...
+   3 & c:\Users\mrina\Downloads\rubu_in\.venv\Scripts\python.exe c:/Users/mrina/Downloads/rubu_in/heatmap_live.py                   
+   4 python screening.py --port COM6 --batch B01 --ref 28CDFF5C40240B23                                                             
+   5 python screening.py --port COM6 --batch B01 --ref 28CDFF5C40240B23                                                             
+   6 python heatmap_live.py --source serial --port COM6                                                                             
+   7 python heatmap_live.py --source serial --port COM6                                                                             
+   8 python thermal3d.py --live                                                                                                     
+   9 pip install scipy                                                                                                              
+  10 python thermal3d.py                                                                                                            
+  11 python thermal3d.py --live                                                                                                     
+  12 python thermal3d.py                                                                                                            
+  13 python thermal3d.py                                                                                                            
+  14 cd C:\Users\mrina\Downloads\rubu_in...                                                                                         
+  15 (Get-Content thermal3d.py) -replace 'cm\.get_cmap\("inferno"\)', 'plt.get_cmap("inferno")' | Set-Content thermal3d.py...       
+  16 python thermal3d.py --hotspot E --row 2 --col 4                                                                                
+  17 python thermal3d.py --live --big --cmap turbo --hotspot N --row 1 --col 3                                                      
+  18 python thermal3d.py --live --big --cmap turbo --hotspot N --row 1 --col 3                                                      
+  19 pip install scikit-learn joblib                                                                                                
+  20 python ml_train.py                                                                                                             
+  21 git add -A...                                                                                                                  
+  22 python dataset_viewer.py --cmap turbo                                                                                          
+  23 python dataset_viewer3d.py --cmap turbo      

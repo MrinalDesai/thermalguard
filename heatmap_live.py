@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 
 WALLS = ["N", "E", "S", "W"]
-ROWS, COLS = 4, 5
+ROWS, COLS = 4, 6
 MAP_PATH = Path(__file__).parent.parent / "config" / "sensor_map.json"
 
 
@@ -126,9 +126,21 @@ def main():
     src = frames_sim() if args.source == "sim" else frames_serial(args.port)
 
     plt.ion()
-    fig, axes = plt.subplots(1, 4, figsize=(14, 4.2))
-    fig.canvas.manager.set_window_title("ThermalGuard") if not args.save else None
-    cmap = plt.get_cmap("inferno")
+    import os
+    panel = os.environ.get("PANEL", "0") == "1"
+    if panel:
+        fig, axes = plt.subplots(1, 4, figsize=(12.8, 4.0), dpi=100)
+        fig.subplots_adjust(left=0.02, right=0.90, top=0.80, bottom=0.06,
+                            wspace=0.15)
+    else:
+        fig, axes = plt.subplots(1, 4, figsize=(14, 4.2))
+    try:
+        fig.canvas.manager.set_window_title("ThermalGuard")
+        if panel:
+            fig.canvas.manager.full_screen_toggle()
+    except Exception:
+        pass
+    cmap = plt.get_cmap("inferno").copy()
     cmap.set_bad(color="#777777")
 
     images, texts = {}, {}

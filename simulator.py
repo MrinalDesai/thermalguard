@@ -25,11 +25,18 @@ def synth_rom(wall_i, idx):
 
 
 class ThermalSim:
-    def __init__(self, ambient=27.5, noise=0.08, seed=42):
+    def __init__(self, ambient=27.5, operating_delta=6.0, noise=0.08,
+                 seed=42):
+        """ambient: room air (AMB probes read ~this).
+        operating_delta: equipment surfaces run this far above ambient
+        under normal load — a live bank operates warm (~33.5°C surfaces
+        at 27.5°C room). 0 = powered-off rack (reads 'dead')."""
         self.rng = np.random.default_rng(seed)
         self.ambient = ambient
+        self.operating_delta = operating_delta
         self.noise = noise
-        self.walls = {w: np.full((ROWS, COLS), ambient) for w in WALLS}
+        self.walls = {w: np.full((ROWS, COLS), ambient + operating_delta)
+                      for w in WALLS}
         self.seq = 0
         self.hotspots = []   # dicts: wall,row,col,power,growth
         self.dead = set()    # ROMs reporting invalid
@@ -53,12 +60,13 @@ class ThermalSim:
 
     # ------------------------------------------------ physics step
     def step(self):
-        self.ambient += self.rng.normal(0, 0.01)  # slow drift
+        self.ambient += self.rng.normal(0, 0.01)  # slow room drift
+        target = self.ambient + self.operating_delta
 
         for w in WALLS:
             m = self.walls[w]
-            # relax toward ambient
-            m += (self.ambient - m) * 0.05
+            # relax toward operating temperature
+            m += (target - m) * 0.05
             # diffuse to neighbours (simple 4-neighbour kernel)
             pad = np.pad(m, 1, mode="edge")
             lap = (pad[:-2, 1:-1] + pad[2:, 1:-1] +
@@ -69,6 +77,8 @@ class ThermalSim:
             m = self.walls[h["wall"]]
             m[h["row"], h["col"]] += h["power"]
             h["power"] *= h["growth"]
+        for w in WALLS:
+            np.clip(self.walls[w], -10.0, 120.0, out=self.walls[w])
 
         return self._frame()
 

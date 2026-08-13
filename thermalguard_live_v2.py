@@ -30,6 +30,78 @@ from statemachine import StateMachine, Relay, COLORS, THRESH
 VMIN, VMAX = 22.0, 45.0
 
 
+def frames_tcp(listen_port=5555):
+    """Receive frame lines from the laptop's serial_bridge over TCP.
+    Merges all boards' sensors into one frame per cycle."""
+    import socket
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    srv.bind(("0.0.0.0", listen_port))
+    srv.listen(1)
+    print(f"[tcp] waiting for bridge on port {listen_port} ...")
+    merged, seq = {}, 0
+    import time as _t
+    while True:
+        conn, addr = srv.accept()
+        print(f"[tcp] bridge connected from {addr[0]}")
+        buf = b""
+        last_yield = _t.time()
+        try:
+            conn.settimeout(1.0)
+            while True:
+                try:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        line = line.decode(errors="ignore").strip()
+                        if not line.startswith('{"seq"'):
+                            continue
+                        try:
+                            f = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        for bus in f.get("buses", []):
+                            for s in bus.get("sensors", []):
+                                if s.get("ok"):
+                                    merged[s["rom"]] = s["t"]
+                except socket.timeout:
+                    pass
+                if _t.time() - last_yield >= 1.0 and merged:
+                    seq += 1
+                    last_yield = _t.time()
+                    yield {"seq": seq, "buses": [{"bus": 0,
+                           "enabled": True,
+                           "sensors": [{"rom": r, "t": t, "ok": True}
+                                       for r, t in merged.items()]}]}
+        except Exception as e:
+            print(f"[tcp] bridge dropped ({e}) — waiting for reconnect")
+
+
+def frames_http(url, cycle=1.0):
+    """Poll the laptop's frame server — Mrinal's pull architecture.
+    Each poll independent: a hiccup costs one poll, never a stream."""
+    import urllib.request
+    import time as _t
+    print(f"[http] polling {url} every {cycle}s")
+    last_seq = -1
+    while True:
+        t0 = _t.time()
+        try:
+            with urllib.request.urlopen(url, timeout=2) as r:
+                f = json.loads(r.read().decode())
+            if f.get("seq", -1) != last_seq:
+                last_seq = f.get("seq", -1)
+                yield f
+        except Exception as e:
+            print(f"[http] poll missed ({type(e).__name__}) — retrying")
+        dt = _t.time() - t0
+        if dt < cycle:
+            _t.sleep(cycle - dt)
+
+
 def frames_sim(inject_at):
     sim = ThermalSim()
     n = 0
@@ -151,7 +223,8 @@ def frames_serial(port_name, cycle=1.0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", choices=["sim", "serial"], default="sim")
+    ap.add_argument("--source", choices=["sim", "serial", "tcp", "http"], default="sim")
+    ap.add_argument("--url", default="http://10.0.0.1:8000/frame.json")
     ap.add_argument("--port", default="auto")
     ap.add_argument("--inject", type=int, default=25)
     ap.add_argument("--timers", nargs=3, type=float, default=[5, 10, 20])
@@ -174,7 +247,9 @@ def main():
     sm = StateMachine(*args.timers, relay)
     scorer = AnomalyScorer()
     src = frames_sim(args.inject) if args.source == "sim" \
-        else frames_serial(args.port, args.cycle)
+        else (frames_tcp() if args.source == "tcp"\
+              else (frames_http(args.url, args.cycle) if args.source == "http"\
+                    else frames_serial(args.port, args.cycle)))
 
     plt.ion()
     import thermal3d as t3d
@@ -194,8 +269,8 @@ def main():
     cmap.set_bad(color="#666666")
     norm = Normalize(VMIN, VMAX)
 
-    g_rows = REAL_ROWS if args.source == "serial" else ROWS
-    g_cols = REAL_COLS if args.source == "serial" else COLS
+    g_rows = REAL_ROWS if args.source != "sim" else ROWS
+    g_cols = REAL_COLS if args.source != "sim" else COLS
     images, texts = {}, {}
     for w, ax in axes.items():
         im = ax.imshow(np.full((g_rows, g_cols), np.nan), cmap=cmap,
@@ -223,7 +298,7 @@ def main():
     n = 0
     for frame in src:
         n += 1
-        if args.source == "serial":
+        if args.source in ("serial", "tcp", "http"):
             mats, amb, unmapped = mats_from_mapped(frame, rom_map)
         else:
             mats, amb = frame_to_walls(frame)
@@ -273,7 +348,7 @@ def main():
         live_n = sum(int(np.sum(~np.isnan(mats[w]))) for w in WALLS)
         msg = (f"{state}   score {score:.2f}   max {hot_t:.1f}°C @ {hot_at}"
                f"   Δamb {hot_t - amb:+.1f}°C   relay {relay.state}")
-        if args.source == "serial":
+        if args.source in ("serial", "tcp", "http"):
             msg += f"   live {live_n}" +                    (f" (+{unmapped} unmapped)" if unmapped else "")
         if state == "ISOLATED":
             msg += "   [R = reset]"

@@ -53,10 +53,19 @@ def load_rom_map():
 
 
 def mats_from_mapped(frame, rom_map):
-    """Place real sensors into 4x4 wall grids by sensor_map.json."""
+    """Place real sensors into 4x4 wall grids by sensor_map.json.
+
+    Missing cells are filled with an average value for display/continuity:
+    - missing cell on a wall -> that wall's current mean
+    - completely missing wall -> global mean of all currently live wall sensors
+
+    real_live_n is counted BEFORE filling so the UI still reports the genuine
+    number of live sensors.
+    """
     mats = {w: np.full((REAL_ROWS, REAL_COLS), np.nan) for w in WALLS}
     ambs = []
     unmapped = 0
+
     for bus in frame.get("buses", []):
         for s in bus.get("sensors", []):
             if not s.get("ok"):
@@ -65,15 +74,53 @@ def mats_from_mapped(frame, rom_map):
             if e is None:
                 unmapped += 1
                 continue
+
             if e.get("wall") == "AMB":
                 ambs.append(s["t"])
             elif e.get("wall") in WALLS:
                 r, c = e.get("row", 0), e.get("col", 0)
                 if 0 <= r < REAL_ROWS and 0 <= c < REAL_COLS:
                     mats[e["wall"]][r, c] = s["t"] + e.get("offset", 0.0)
-    amb = float(np.mean(ambs)) if ambs else         float(np.nanmean([np.nanmean(m) for m in mats.values()
-                          if np.any(~np.isnan(m))]))
-    return mats, amb, unmapped
+
+    # Count REAL sensor values before any average-fill.
+    real_live_n = sum(int(np.sum(~np.isnan(m))) for m in mats.values())
+
+    if real_live_n:
+        live_values = np.concatenate(
+            [m[~np.isnan(m)] for m in mats.values() if np.any(~np.isnan(m))]
+        )
+        global_mean = float(np.mean(live_values))
+    else:
+        live_values = np.array([], dtype=float)
+        global_mean = np.nan
+
+    imputed_n = 0
+    if real_live_n:
+        for w in WALLS:
+            m = mats[w]
+            missing = np.isnan(m)
+            if not np.any(missing):
+                continue
+
+            # Same-wall average is best; use global average if an entire wall
+            # has temporarily disappeared.
+            fill_value = (
+                float(np.nanmean(m))
+                if np.any(~missing)
+                else global_mean
+            )
+            imputed_n += int(np.sum(missing))
+            m[missing] = fill_value
+
+    if ambs:
+        amb = float(np.mean(ambs))
+    elif real_live_n:
+        # Use REAL readings only for the ambient fallback.
+        amb = global_mean
+    else:
+        amb = np.nan
+
+    return mats, amb, unmapped, real_live_n, imputed_n
 
 
 def find_ports():
@@ -224,10 +271,16 @@ def main():
     for frame in src:
         n += 1
         if args.source == "serial":
-            mats, amb, unmapped = mats_from_mapped(frame, rom_map)
+            mats, amb, unmapped, real_live_n, imputed_n = mats_from_mapped(
+                frame, rom_map
+            )
         else:
             mats, amb = frame_to_walls(frame)
             unmapped = 0
+            real_live_n = sum(
+                int(np.sum(~np.isnan(mats[w]))) for w in WALLS
+            )
+            imputed_n = 0
         try:
             score = scorer.score(mats, amb)
         except Exception:
@@ -270,11 +323,16 @@ def main():
         ax3d.set_axis_off()
         ax3d.view_init(elev=elev, azim=azim)
 
-        live_n = sum(int(np.sum(~np.isnan(mats[w]))) for w in WALLS)
+        live_n = real_live_n
+        delta_amb = hot_t - amb if np.isfinite(amb) else np.nan
         msg = (f"{state}   score {score:.2f}   max {hot_t:.1f}°C @ {hot_at}"
-               f"   Δamb {hot_t - amb:+.1f}°C   relay {relay.state}")
+               f"   Δamb {delta_amb:+.1f}°C   relay {relay.state}")
         if args.source == "serial":
-            msg += f"   live {live_n}" +                    (f" (+{unmapped} unmapped)" if unmapped else "")
+            msg += f"   live {live_n}"
+            if imputed_n:
+                msg += f" (+{imputed_n} avg-filled)"
+            if unmapped:
+                msg += f" (+{unmapped} unmapped)"
         if state == "ISOLATED":
             msg += "   [R = reset]"
         corner.set_text(msg)

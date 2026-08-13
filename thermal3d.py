@@ -67,6 +67,22 @@ def wall_surface(ax, wall, mat, cmap, norm):
                 ax.scatter(0, hh, vv, c="white", s=4, depthshade=False)
 
 
+def wall_surface_blank(ax, wall):
+    """Draw a wall as a flat grey face — no data, no thermal paint."""
+    h = np.array([[0.0, COLS], [0.0, COLS]])
+    v = np.array([[ROWS, ROWS], [0.0, 0.0]])
+    Z = v
+    if wall == "N":
+        X, Y = h, np.full_like(h, COLS)
+    elif wall == "S":
+        X, Y = COLS - h, np.zeros_like(h)
+    elif wall == "E":
+        X, Y = np.full_like(h, COLS), COLS - h
+    else:
+        X, Y = np.zeros_like(h), h
+    ax.plot_surface(X, Y, Z, color="#8a8a8a", alpha=0.55, shade=False)
+
+
 def frame_to_walls(frame):
     """96 wall sensors -> {wall: 4x6}, using simulator's deterministic layout."""
     mats = {w: np.full((ROWS, COLS), np.nan) for w in WALLS}

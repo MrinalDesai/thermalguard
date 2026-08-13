@@ -1,4 +1,7 @@
-"""ThermalGuard LIVE — the resident application.
+"""ThermalGuard LIVE (POLLED) — for multiple acquisition boards.
+
+Pair with the polled firmware: each board answers one frame per 'P'.
+Run:  python thermalguard_live_polled.py --source serial
 
 One window: the four-wall live heatmap. System state is shown as the
 window's background colour (green/amber/orange/red/purple) plus a corner
@@ -91,58 +94,45 @@ def find_ports():
     return sorted(set(out))
 
 
-def _port_reader(port_name, q):
-    """One thread per board; reconnects alone so one unplug never
-    darkens the rest."""
+def frames_serial(port_name, cycle=1.0):
+    """POLLED mode: boards stay silent until sent 'P'; one active
+    stream at a time — no interleaving, any number of boards.
+    Requires the polled firmware (loop waits for 'P')."""
     import serial
     import time as _t
-    while True:
+
+    names = [port_name] if port_name not in (None, "auto") else find_ports()
+    if not names:
+        raise SystemExit("no serial ports found — boards plugged in?")
+    print(f"[serial] POLLED mode, {len(names)} port(s): {', '.join(names)}")
+    conns = []
+    for nm in names:
         try:
-            with serial.Serial(port_name, 115200, timeout=5) as port:
-                port.reset_input_buffer()
-                while True:
-                    line = port.readline().decode(errors="ignore").strip()
-                    if not line.startswith('{"seq"'):
-                        continue
-                    try:
-                        frame = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    temps = {}
-                    for bus in frame.get("buses", []):
-                        for s in bus.get("sensors", []):
-                            if s.get("ok"):
-                                temps[s["rom"]] = s["t"]
-                    q.put(temps)
-        except Exception:
-            _t.sleep(2)   # port gone/busy — retry quietly
+            conns.append(serial.Serial(nm, 115200, timeout=3))
+        except Exception as e:
+            print(f"[serial] {nm} unavailable ({e}) — skipping")
+    _t.sleep(2.5)                      # boards auto-reset on port open
+    for c in conns:
+        c.reset_input_buffer()
 
-
-def frames_serial(port_name, cycle=1.0):
-    """Merge every detected board into one synthetic frame per cycle."""
-    import queue as _queue
-    import threading
-    import time as _t
-
-    ports = [port_name] if port_name not in (None, "auto") else find_ports()
-    if not ports:
-        raise SystemExit("no serial ports found — are the boards plugged in?")
-    print(f"[serial] reading {len(ports)} port(s): {', '.join(ports)}")
-    q = _queue.Queue()
-    for p in ports:
-        threading.Thread(target=_port_reader, args=(p, q),
-                         daemon=True).start()
-
-    merged = {}
-    seq = 0
+    merged, seq = {}, 0
     while True:
-        t_end = _t.time() + cycle
-        while _t.time() < t_end:
+        for c in conns:
             try:
-                merged.update(q.get(timeout=max(0.05,
-                                                t_end - _t.time())))
-            except _queue.Empty:
-                pass
+                c.reset_input_buffer()
+                c.write(b'P')
+                t_end = _t.time() + 2.5
+                while _t.time() < t_end:
+                    line = c.readline().decode(errors="ignore").strip()
+                    if line.startswith('{"seq"'):
+                        f = json.loads(line)
+                        for bus in f.get("buses", []):
+                            for s in bus.get("sensors", []):
+                                if s.get("ok"):
+                                    merged[s["rom"]] = s["t"]
+                        break
+            except Exception:
+                continue
         seq += 1
         yield {"seq": seq, "buses": [{"bus": 0, "enabled": True,
                "sensors": [{"rom": r, "t": t, "ok": True}

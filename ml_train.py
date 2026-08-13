@@ -34,13 +34,12 @@ WINDOW = 5  # frames of history for rise-rate features (10s at 2s cycle)
 
 # ------------------------------------------------------------------ features
 def neighbor_max_delta(m):
-    """Largest |cell - 4-neighbour| across the wall."""
+    """Largest |cell - 4-neighbour| across the wall (any grid shape)."""
+    m = np.asarray(m, float)
     best = 0.0
-    for dr, dc in [(0, 1), (1, 0)]:
-        a = m[max(0, -dr):ROWS - dr or ROWS, max(0, -dc):COLS - dc or COLS]
-        b = m[dr:, dc:]
-        d = np.abs(a - b)
-        if d.size:
+    for axis in (0, 1):
+        d = np.abs(np.diff(m, axis=axis))
+        if d.size and not np.all(np.isnan(d)):
             best = max(best, float(np.nanmax(d)))
     return best
 

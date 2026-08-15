@@ -43,6 +43,12 @@ def reader(port_name):
             with serial.Serial(port_name, 115200, timeout=5) as port:
                 port.reset_input_buffer()
                 print(f"[server] reading {port_name}")
+                import sys
+                relay_target = getattr(sys.modules[__name__],
+                                       "RELAY_PORT_NAME", None)
+                if relay_target and port_name == relay_target:
+                    RELAY_CONN["port"] = port
+                    print(f"[relay] armed on {port_name}")
                 while True:
                     line = port.readline().decode(errors="ignore").strip()
                     if not line.startswith('{"seq"'):
@@ -68,8 +74,30 @@ def reader(port_name):
             time.sleep(2)
 
 
+RELAY_CONN = {"port": None}   # set to the relay-board's serial handle
+
+
 class H(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path.startswith("/relay"):
+            cmd = "I" if "cmd=I" in self.path else \
+                  ("C" if "cmd=C" in self.path else None)
+            ok = False
+            conn = RELAY_CONN.get("port")
+            if cmd and conn is not None:
+                try:
+                    conn.write(cmd.encode())
+                    ok = True
+                    print(f"[relay] sent '{cmd}'")
+                except Exception as e:
+                    print(f"[relay] write failed: {e}")
+            body = (b'{"relay":"ok"}' if ok else b'{"relay":"fail"}')
+            self.send_response(200 if ok else 503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path != "/frame.json":
             self.send_response(404)
             self.end_headers()
@@ -87,6 +115,14 @@ class H(BaseHTTPRequestHandler):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--relay-port", default=None,
+                    help="COM port of the board wearing the relay "
+                         "(e.g. COM21); /relay commands go there")
+    args = ap.parse_args()
+    import sys
+    setattr(sys.modules[__name__], "RELAY_PORT_NAME", args.relay_port)
     ports = find_ports()
     if not ports:
         raise SystemExit("no acquisition boards found")

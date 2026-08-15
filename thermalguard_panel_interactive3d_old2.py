@@ -158,25 +158,6 @@ class Scorer:
             return 0.0
 
 
-RELAY_BASE = {"url": None}
-
-
-def _fire_relay(cmd):
-    """Best-effort physical relay via the frame server; never blocks UI."""
-    base = RELAY_BASE.get("url")
-    if not base:
-        return
-    import threading as _th
-    import urllib.request as _ur
-
-    def go():
-        try:
-            _ur.urlopen(f"{base}/relay?cmd={cmd}", timeout=2).read()
-        except Exception as e:
-            print(f"[relay] request failed: {e}")
-    _th.Thread(target=go, daemon=True).start()
-
-
 class StateMachine:
     def __init__(self, watch_s=5.0, warn_s=10.0, crit_s=20.0):
         self.state = "NORMAL"
@@ -190,7 +171,6 @@ class StateMachine:
         if self.state == "CRITICAL":
             self.relay = "OPEN"
             print(">>> RELAY OPEN — LOAD ISOLATED <<<")
-            _fire_relay("I")
             self.state = "ISOLATED"
             return self.state
 
@@ -211,7 +191,6 @@ class StateMachine:
     def reset(self):
         self.state = "NORMAL"
         self.relay = "CLOSED"
-        _fire_relay("C")
         self.above = None
         print("[state] manual reset -> NORMAL")
 
@@ -321,8 +300,6 @@ def main():
     else:
         threading.Thread(target=poll_http, args=(args.url, shared, args.poll), daemon=True).start()
 
-    if getattr(args, "url", None):
-        RELAY_BASE["url"] = args.url.rsplit("/", 1)[0]
     rom_map = load_map()
     scorer = Scorer()
     sm = StateMachine(*args.timers)
